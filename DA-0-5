@@ -1,0 +1,1648 @@
+# TODO:
+#   summary line of command called before results
+#   when all root degrees greater than diff order, show appropriate error message
+#   optional value for complex
+#   something about setting digits
+#   verbose mod choice
+#   get maple bug fixed the remove fsolve(evalf(f)) stuff
+#       for now, going to have to live with fsolve(eval(f)) and 
+#       perform a verification on accuracy
+#       OR convert to try/catch
+#   turn diff_order into optional argument, default=2
+#   partial code, i.e., just_approximants -> given_approximants
+#   fix timing notices
+#	something about digits for CalcExp [option to bump to 1000?]
+#   failing when exact
+#   option to print exponents on each run (i.e., to verify 1324 behavior)
+#   option for ugly output
+#
+#   get solving all figured out (see guessfunc)
+#
+######## BUG #########
+#  > K := da_estimate(%, 2, inhom_degree=20, degree_variation=1, verbose=3):            
+#   Setting inhom_degree to 20
+#   Setting degree_variation to 1
+#   Setting verbose to 3
+#
+#   Error, (in da_estimate) unable to execute seq
+####### END BUG ######
+
+
+kernelopts(printbytes=false):
+with(ArrayTools):
+with(combinat):
+with(ListTools):
+with(powseries):
+with(SolveTools):
+with(StringTools):
+
+#------------------------------------------------------------------------
+#
+#   DA: A Maple package to perform the differential approximant method.
+#
+#   Created: July 13, 2015
+#   This version: January 15, 2016
+#       (v0.5.0)
+#
+#   Written by:
+#      Jay Pantone (Dartmouth College)
+#
+#------------------------------------------------------------------------
+
+
+#------------------------------------------------------------------------
+#
+#   Changes in this version:
+#     -> New root grouping algorithm
+#     -> Results now print with error term in parens rather than +/-
+#   
+#   
+#
+#   
+#   
+#
+#------------------------------------------------------------------------
+
+printf("#-----------------------------------------------------------------------#");
+printf("\n# DA: A Maple package to perform the differential approximant method.   #\n");
+printf("#                                                                       #\n");
+printf("# Written by:                                                           #\n");
+printf("#    Jay Pantone (Dartmouth College)                                    #\n");
+printf("#                                                                       #\n");
+printf("# Version 0.5.0                                                         #\n");
+printf("#                                                                       #\n");
+printf("# For detailed information, run \'da_estimate();\'.                       #\n");
+printf("#-----------------------------------------------------------------------#\n\n");
+
+
+da_estimate := proc(terms, diff_order)
+	local output, print_ratios, ratios_degree, bias, lode_extension, max_terms_to_use, inhom_degree, degree_seq_list, diagonal_degree, degree_variation, diagonal_degree_list, degree_variation_list, deg_set_type, allowed_degs, i, toquit, valid_degree_seqs, to_check, thrown_away, approximants, deg_list, verbose, t, tt, roots, init_tol_exp, roots_to_check, root_under_consideration, smallest_tol_exp, equiv_classes, tolerance, multi_root_tol, iloop, num_in_this_poly, jloop, indices_to_delete, num_failed, new_approx,temp_list, first_array, multi_root_distance, threshold_for_acceptance, total_roots_to_sort, check_steps, overall_time, old_roots, number_that_have_root, hold_the_roots, kept_equiv_classes, final_equiv_classes, multi_root_ratio, max_tol, current_tol, flat_roots, new_equiv_classes, j, refined, elimed, new_final, td, target, new_final_equiv_class, min_multi_root_tol, tc, root_occurs, point_exp_pairs, pair, closest_root, this_exp, types, to_delete, this_type_exps, exp_start, exp_end, tail_percent_to_remove, this_pair_exps, exps_failed, root_t, exp_diff, exp_mid, exp_diff_pow, root_entry, maple_bug_occur, results_string, complex_singularities, fsolve_timeout, exploop, root_groups_list, midpt_and_radius, completely_flat_roots, radius_exp, new_multi_exp, new_radius, new_group_for_this_root, midpt, started_checking, root_indices, reparts, imparts, rediff, imdiff, main_num_disp, roots_to_return, model_timeout;
+
+  
+  if nargs = 0 then
+    # Print help and quit.
+    printf("\nda_estimate: This procedure is called with a list of coefficients and optional arguments.\n\nThere are three ways to choose the polynomial coefficient degrees to use in an approximant.\n\n(1) Specify a list of all degrees sequences using degree_seq_list=DSL. E.g., if DSL=[[3,3,3,3],[0,1,2,3]] then two approximants will be used: one in which all polynomial coefficients have degree 3, and one in which the coefficient of f has degree 0, the coefficient of f' has degree 1, and so on. Each list in DSL should have length diff_order+1.\n\n(2) Specify a diagonal_degree=D and degree_variation=V. The algorithm will the use all approximants such that each polynomial coefficient has degree in [D-V,D+V]. E.g., if diff_order=1, D=5, and V=1, then the effective degree_seq_list will be [[4,4],[4,5],[5,4],[5,5],[5,6],[6,5],[6,6]].\n\n(3) Specify an diagonal_degree_list=DL and degree_variation_list=VL. Similar to (2), except the degree of each polynomial coefficient will start at its corresponding DL[i] and vary by at most VL[i] (that is, it will vary in [DL[i]-VL[i],DL+VL[i]]).\n\nUsing optional variables from more than one of the options above will result in an error. Using none of the optional variables above will result in choice (2) with diagonal_degree as large as possible (given max_terms_to_use) and degree_variation=1. In all cases, the degree of the inhomogeneous polynomial will be governed separately.\n\n======================================================\n\n");
+
+    printf("max_terms_to_use=T : use at most T terms in any approximant [default T=length(terms)]\n\n");
+
+    printf("inhom_degree=D : if D is an integer, use an inhomogeneous term of degree D; if D is a list try each approximant once with each degree given in D [default D=10]\n\n");
+
+	printf("degree_seq_list=DSL : (see above)\n\n");	
+    printf("diagonal_degree=D : (see above)\n");
+    printf("degree_variation=V : (see above)\n\n");
+    printf("diagonal_degree_list=DL : (see above)\n");
+    printf("degree_variation_list=VL : (see above)\n\n");
+    
+    printf("verbose=V : integer between 0 and 5; 0 prints no information, 5 prints a lot [default V=1]\n\n");
+
+    printf("======================================================\n\n");
+
+    printf("Examples:\n");
+    printf("\t---;\n");
+    return();
+  fi;
+  
+  max_terms_to_use := nops(terms);
+  inhom_degree := [10];
+  degree_seq_list := [];
+  diagonal_degree := floor((max_terms_to_use-(max(inhom_degree)+1)-diff_order)/(diff_order+1))-1-degree_variation;
+  degree_variation := 1;
+  diagonal_degree_list := [];
+  degree_variation_list := [];
+  deg_set_type := 0;
+  toquit := false;
+  verbose := 1;
+  multi_root_ratio := 0.5;
+  min_multi_root_tol := 8;
+  smallest_tol_exp := 8;
+  threshold_for_acceptance := .8;
+  max_tol := 500;
+  tail_percent_to_remove := 0.15;
+  maple_bug_occur := 0;
+  fsolve_timeout := 600;
+  complex_singularities := true;
+  print_ratios := false;
+  ratios_degree := 0;
+  bias := [];
+  model_timeout := 180;
+  
+  output := "";
+  overall_time := time();
+  
+  # Read the optional command line arguments
+  for i from 3 to nargs do
+#  	printf("%a\n",args[i]);
+	# =========================================
+    if type(args[i], `=`) and convert(op(1, args[i]), string) = "inhom_degree" then
+      if type(op(2, args[i]), nonnegint) then
+        inhom_degree := [op(2, args[i])];
+        output := cat(output, sprintf("Setting inhom_degree to %a\n", inhom_degree));
+      elif type(op(2, args[i]), list(nonnegint)) then
+      	inhom_degree := op(2, args[i]);
+        output := cat(output, sprintf("Setting inhom_degree to %a\n", inhom_degree));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+        toquit := true;
+      fi;
+    # =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "max_terms_to_use" then
+      if type(op(2, args[i]), nonnegint) then
+        max_terms_to_use := op(2, args[i]);
+        if max_terms_to_use > nops(terms) then
+        	error "max_terms_to_use > length(terms)";
+        	return();
+        fi;
+        output := cat(output, sprintf("Setting max_terms_to_use to %a\n", max_terms_to_use));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+        toquit := true;
+      fi;
+	# =========================================      
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "degree_seq_list" then
+      if type(op(2, args[i]), listlist(nonnegint)) then
+        degree_seq_list := op(2, args[i]);
+        if nops(degree_seq_list) <= 1 then
+        	error "degree_seq_list must have length at least two";
+        fi;
+        if deg_set_type <> 0 then
+        	error "conflicting degree options";
+        fi;
+        deg_set_type := 1;
+        if nops(degree_seq_list[1]) <> diff_order+1 then
+        	error "degree_seq_list has lists of wrong length";
+        fi;
+        output := cat(output, sprintf("Setting degree_seq_list to %a\n", degree_seq_list));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+        toquit := true;
+      fi;
+	# =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "diagonal_degree" then
+      if type(op(2, args[i]), nonnegint) then
+        diagonal_degree := op(2, args[i]);
+        if diagonal_degree = 0 then
+        	error "diagonal_degree must be greater than 0";
+        fi;
+        output := cat(output, sprintf("Setting diagonal_degree to %a\n", diagonal_degree));
+        if deg_set_type <> 0 and deg_set_type <> 2 then
+        	error "conflicting degree options";
+        fi;
+        deg_set_type := 2;
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+        toquit := true;
+      fi;
+    # =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "tail_percent_to_remove" then
+      if type(op(2, args[i]), nonnegative) then
+        tail_percent_to_remove := op(2, args[i]);
+        if tail_percent_to_remove < 0 or tail_percent_to_remove > 0.5then
+        	error "tail_percent_to_remove must be between 0 and 0.5";
+        fi;
+        output := cat(output, sprintf("Setting tail_percent_to_remove to %a\n", tail_percent_to_remove));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+        toquit := true;
+      fi;
+	# =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "degree_variation" then
+      if type(op(2, args[i]), nonnegint) then
+        degree_variation := op(2, args[i]);
+        output := cat(output, sprintf("Setting degree_variation to %a\n", degree_variation));
+        if deg_set_type <> 0 and deg_set_type <> 2 then
+        	error "conflicting degree options";
+        fi;
+        deg_set_type := 2;
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+        toquit := true;
+      fi;
+	# =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "diagonal_degree_list" then
+      if type(op(2, args[i]), list(nonnegint)) then
+        diagonal_degree_list := op(2, args[i]);
+        output := cat(output, sprintf("Setting diagonal_degree_list to %a\n", diagonal_degree_list));
+        if deg_set_type <> 0 and deg_set_type <> 3 then
+        	error "conflicting degree options";
+        fi;
+        deg_set_type := 3;
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+        toquit := true;
+      fi;
+    # =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "degree_variation_list" then
+      if type(op(2, args[i]), list(nonnegint)) then
+        degree_variation_list := op(2, args[i]);
+
+        if sum(degree_variation_list[iloop],iloop=1..nops(degree_variation_list)) = 0 then
+        	error "degree_variation_list must at least one positive integer";
+        fi;
+
+        output := cat(output, sprintf("Setting degree_variation_list to %a\n", degree_variation_list));
+        if deg_set_type <> 0 and deg_set_type <> 3 then
+        	error "conflicting degree options";
+        fi;
+        deg_set_type := 3;
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+        toquit := true;
+      fi;
+    # =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "verbose" then
+      if type(op(2, args[i]), nonnegint) then
+        verbose := op(2, args[i]);
+        output := cat(output, sprintf("Setting verbose to %a\n", verbose));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+      fi;
+    # =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "complex" then
+      if type(op(2, args[i]), boolean) then
+        complex_singularities := op(2, args[i]);
+        output := cat(output, sprintf("Setting complex to %a\n", complex_singularities));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+      fi;
+    # =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "fsolve_timeout" then
+      if type(op(2, args[i]), positive) then
+        fsolve_timeout := op(2, args[i]);
+        output := cat(output, sprintf("Setting fsolve_timeout to %a\n", fsolve_timeout));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+      fi;
+    # =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "max_tol" then
+      if type(op(2, args[i]), posint) then
+        max_tol := op(2, args[i]);
+        output := cat(output, sprintf("Setting max_tol to %a\n", max_tol));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+      fi;
+    # =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "print_ratios" then
+      if type(op(2, args[i]), posint) then
+        print_ratios := true;
+        ratios_degree := op(2, args[i]);
+        output := cat(output, sprintf("Setting ratios_degree to %a\n", ratios_degree));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+      fi;
+     # =========================================
+    elif type(args[i], `=`) and convert(op(1, args[i]), string) = "bias" then
+      if type(op(2, args[i]), realcons) then
+        bias := [op(2, args[i])];
+        output := cat(output, sprintf("Setting bias to %a\n", realcons));
+      elif type(op(2,args[i]), list(realcons)) then
+      	bias := op(2,args[i]);
+      	output := cat(output, sprintf("Setting bias to %a\n", realcons));
+      else
+        output := cat(output, sprintf("Warning: unable to interpret argument: %a\n", args[i]));
+      fi;
+    fi;
+    
+  od;
+  
+	if verbose >= 1 and Length(output) > 1 then
+		printf("%s\n",output);
+		if toquit then
+			return();
+		fi;
+	fi;
+
+	if deg_set_type = 0 then
+		diagonal_degree := floor((max_terms_to_use-(max(inhom_degree)+1)-diff_order)/(diff_order+1))-1-degree_variation;
+		if verbose >= 1 then
+			printf("Setting diagonal_degree to %a\n", diagonal_degree);
+		fi;
+		deg_set_type := 2;
+	fi;
+	
+	if deg_set_type = 2 then
+		degree_seq_list := itertolist(cartprod([inhom_degree, seq([seq(i,i=(diagonal_degree-degree_variation)..(diagonal_degree+degree_variation))],j=0..diff_order)]));
+	fi;
+	
+	if deg_set_type = 3 then
+		if nops(diagonal_degree_list) <> diff_order+1 or nops(degree_variation_list) <> diff_order+1 then
+			error "diagonal_degree_list or degree_variation_list have wrong length";
+		fi;
+		degree_seq_list := itertolist(cartprod([inhom_degree, seq([seq(i,i=(diagonal_degree_list[j]-degree_variation_list[j])..(diagonal_degree_list[j]+degree_variation_list[j]))],j=1..diff_order+1)]));
+	fi;
+	
+	#======================================#
+	
+	valid_degree_seqs := [];
+	for i from 1 to nops(degree_seq_list) do
+		to_check := degree_seq_list[i];
+		if sum(to_check[iloop]+1, iloop=1..nops(to_check)) + diff_order - 1 <= max_terms_to_use and min(to_check) >= 0 then
+			valid_degree_seqs := [op(valid_degree_seqs), to_check];
+		fi;
+	od;
+	
+	thrown_away := nops(degree_seq_list) - nops(valid_degree_seqs);
+	
+	if thrown_away > 0 then
+		if thrown_away = 1 then
+			printf("\nWARNING: 1 degree sequence was invalid. It will be discarded.\n",thrown_away);
+		else
+			printf("\nWARNING: %a degree sequences were invalid. They will be discarded.\n",thrown_away);
+		fi;
+	fi;
+	
+	if nops(valid_degree_seqs) <= 1 then
+		error "not enough remaining valid degree sequences";
+	fi;
+	
+	Digits := max_tol;
+	
+	if verbose >= 1 then
+		printf("Building Approximants...\n");
+	fi;
+	
+	approximants := [];
+	num_failed := 0;
+	
+	t := time();
+	tt := time();
+	for i from 1 to nops(valid_degree_seqs) do
+		deg_list := valid_degree_seqs[i];
+		if verbose >= 2 or (verbose = 1 and `mod`(i, 100) = 0) then
+			printf("   [%a/%a - %-4.2f%%]    %a...",i,nops(valid_degree_seqs),i/nops(valid_degree_seqs)*100.0,deg_list);
+		fi;
+
+
+	try
+		new_approx := timelimit(model_timeout, build_approximant([op(..max_terms_to_use, terms)], diff_order, deg_list, bias));
+	catch:
+		new_approx := -1;
+	end try;
+	
+	
+		
+
+		if print_ratios and ratios_degree > 0 then
+			lode_extension := lode_series_with_gfun(subs(x=z,new_approx), terms[..diff_order], ratios_degree):
+			printf("\n\tratios: %a\n\t", [seq([i,evalf(lode_extension[i]/lode_extension[i-1], 10)], i=2..nops(lode_extension))]);
+		fi;
+
+		if new_approx <> -1 then
+			approximants := [op(approximants), new_approx];
+		else
+			printf("  [FAILED]");
+			num_failed := num_failed + 1;
+		fi;
+		if verbose >= 2 or (verbose = 1 and `mod`(i, 100) = 0) then
+			printf("   %5.3f seconds.",time()-tt);
+			tt := time();
+			print();
+		fi;
+	od;
+	if num_failed > 0 then
+		printf("WARNING: %a approximations could not be solved, %a left.\n",num_failed, nops(approximants));
+	fi;
+	if nops(approximants) <= 1 then
+		error "not enough remaining valid degree sequences";
+	fi;
+		
+	if verbose >= 1 then
+		printf("All approximants built in: %5.3f seconds.\n\n",time()-t);
+	fi;
+	
+# 	 return(approximants);
+				
+	#======================================#
+
+	t := time();
+	if verbose >= 1 then
+		printf("Computing roots...   \n");
+	fi;
+	roots := Array([]);
+	
+	tt := time();
+	if verbose >= 3  then
+		printf("   [1/%a - %-4.2f%%]... ",nops(approximants),1/nops(approximants)*100.0);
+		
+	fi;
+	
+	try
+		if complex_singularities then
+			roots(1) := timelimit(fsolve_timeout, Array([fsolve(approximants[1][-1], fulldigits, complex)]));
+		else
+			roots(1) := timelimit(fsolve_timeout, Array([fsolve(approximants[1][-1], fulldigits)]));
+		fi;
+		if verbose >= 3 then
+			printf("   %5.3f seconds.\n",time()-tt);
+			print();
+			tt := time();
+		fi;
+	catch:
+		maple_bug_occur := maple_bug_occur + 1;
+		if verbose >= 3 then
+			printf("[failed due to Maple bug]\n");
+			tt := time();
+		fi;
+	end try;
+	
+		
+	
+		
+	for iloop from 2 to nops(approximants) do
+		if verbose >= 3 or (verbose = 2 and (iloop mod 10) = 0) or (verbose = 1 and (iloop mod 100) = 0) then
+			printf("   [%a/%a - %-4.2f%%]... ",iloop,nops(approximants),iloop/nops(approximants)*100.0);
+		fi;
+		try
+			if complex_singularities then
+				roots(NumElems(roots)+1) := timelimit(fsolve_timeout, Array([fsolve(approximants[iloop][diff_order+2], fulldigits, complex)]));
+			else
+				roots(NumElems(roots)+1) := timelimit(fsolve_timeout, Array([fsolve(approximants[iloop][diff_order+2], fulldigits)]))	;
+			fi;
+			if verbose >= 3 or (verbose = 2 and (iloop mod 10) = 0) or (verbose = 1 and (iloop mod 100) = 0) then
+				printf("   %5.3f seconds.\n",time()-tt);
+				tt := time();
+				print();
+			fi;
+		catch:
+			maple_bug_occur := maple_bug_occur + 1;
+			if verbose >= 3 or (verbose = 2 and (iloop mod 10) = 0) or (verbose = 1 and (iloop mod 100) = 0) then
+				printf("[failed due to Maple bug]\n");
+				tt := time();
+			fi;
+		end try;
+		
+	od;
+		
+	if verbose >= 1 then
+		printf("All roots computed in: %5.3f seconds.\n\n",time()-t);
+	fi;
+	
+			
+	#======================================#
+	
+	if verbose >= 1 then
+		printf("Sorting roots into equivalence classes...   \n");
+	fi;
+	t := time():
+	
+	final_equiv_classes := Array([]):
+
+#	flat_roots := [seq(seq([iloop, roots[iloop][jloop]], jloop=1..NumElems(roots[iloop])), iloop=1..NumElems(roots))]:
+
+	flat_roots := [seq([seq([iloop, roots[iloop][jloop]], jloop=1..NumElems(roots[iloop]))], iloop=1..NumElems(roots))]:
+	
+#	return flat_roots;
+	
+#	return [seq(seq(roots[iloop][jloop], jloop=1..NumElems(roots[iloop])), iloop=1..NumElems(roots))]:
+
+#	equiv_classes := partition_by_digit(flat_roots, 0, true):
+#	equiv_classes := eliminate_eq_classes(equiv_classes, threshold_for_acceptance, nops(approximants)):
+#
+#	if verbose >= 2 then
+#		printf("   Performing first sweep...   \n");
+#	fi;
+#	for current_tol from 1 to max_tol do
+#		if verbose >= 5 and nops(equiv_classes) > 0 then
+#			printf("      Tol Level: %a        Num Equiv Classes: %a\n", _tol, nops(equiv_classes));
+#		fi;current
+#		new_equiv_classes := Array([]):
+#		for i from 1 to nops(equiv_classes) do
+#			refined := partition_by_digit(equiv_classes[i], current_tol, true):
+#			elimed := eliminate_eq_classes(refined, threshold_for_acceptance, nops(approximants)):
+#			if nops(elimed) > 0 then
+#				 for j from 1 to nops(elimed) do
+#				 	new_equiv_classes(NumElems(new_equiv_classes)+1) := elimed[j]:
+#				 od:
+#			elif current_tol >= smallest_tol_exp + 1 then
+#				final_equiv_classes(NumElems(final_equiv_classes)+1) := [current_tol-1, equiv_classes[i]]:
+#			fi:
+#		od:
+#		equiv_classes := convert(new_equiv_classes,list):
+#	od:
+#	
+#	for i from 1 to nops(equiv_classes) do
+#		final_equiv_classes(NumElems(final_equiv_classes)+1) := [max_tol, equiv_classes[i]]:
+#	od:
+#	
+#	return([to_ret, final_equiv_classes]);
+
+
+	final_equiv_classes := partition_roots(flat_roots, threshold_for_acceptance, max_tol, smallest_tol_exp, verbose);
+#	return(final_equiv_classes);
+
+	# Now we need to go sweep up double roots.
+	new_final := Array([]);
+
+	if verbose >= 2 then
+		printf("   Performing second sweep for multiple roots...   \n");
+	fi;
+
+	root_groups_list := [];
+	for iloop from 1 to ArrayTools[NumElems](final_equiv_classes) do
+		midpt_and_radius := root_group_midpoint_and_radius(final_equiv_classes[iloop][2]);
+		reparts := [seq(Re(final_equiv_classes[iloop][2][i][2]), i=1..ArrayTools[Size](final_equiv_classes[iloop][2],1))]:
+		imparts := [seq(Im(final_equiv_classes[iloop][2][i][2]), i=1..ArrayTools[Size](final_equiv_classes[iloop][2],1))]:
+		rediff := (max(reparts) - min(reparts)) / 2;
+		imdiff := (max(imparts) - min(imparts)) / 2;
+		root_groups_list := [op(root_groups_list), [final_equiv_classes[iloop][1], midpt_and_radius[1], [midpt_and_radius[2], rediff, imdiff], final_equiv_classes[iloop][2]]];
+	od:
+
+	completely_flat_roots := [seq(seq([iloop, roots[iloop][jloop]], jloop=1..NumElems(roots[iloop])), iloop=1..NumElems(roots))]:
+	completely_flat_roots := sort(completely_flat_roots, (a,b) -> Re(a[2]) < Re(b[2]));
+	
+#	printf("\n\n\n%a\n\n\n", root_groups_list);
+
+# TODO: Add some more verbosity here
+
+	# for each root group I set the tolerance and I scan through all the other roots and try to find closer enough ones
+	for iloop from 1 to nops(root_groups_list) do
+		if root_groups_list[iloop][3][1] = 0 then
+			radius_exp := -1*max_tol;
+		else
+			radius_exp := min(log(root_groups_list[iloop][3][1])/log(2.0), max_tol);
+		fi;
+
+		new_multi_exp := min(radius_exp * multi_root_ratio, -1*min_multi_root_tol);
+		new_radius := 2^(new_multi_exp);
+
+		new_group_for_this_root := Array([]);
+		midpt := root_groups_list[iloop][2];
+		started_checking := false;
+		indices_to_delete := Array([]);
+
+#		printf("checking at a radius of %a around %a.\n",new_radius, midpt);
+
+		for jloop from 1 to nops(completely_flat_roots) do
+			if abs(Re(completely_flat_roots[jloop][2]) - Re(midpt)) < new_radius then
+				started_checking := true;
+				if dist_squared(completely_flat_roots[jloop][2], midpt) < new_radius^2 then
+					new_group_for_this_root := array_append(new_group_for_this_root, completely_flat_roots[jloop]);
+					indices_to_delete := array_append(indices_to_delete, jloop);
+				fi:
+			else 
+				if started_checking then
+					break;
+				fi:
+			fi:
+
+		od:
+
+#		printf("scan done\n");
+
+		# Check that we still have enough (we could have taken the roots originally this group into another group)
+		root_indices := {seq(new_group_for_this_root[jloop][1], jloop=1..ArrayTools[NumElems](new_group_for_this_root))};
+		if nops(root_indices) > threshold_for_acceptance * nops(approximants) then
+			new_final := array_append(new_final, [root_groups_list[iloop][1], root_groups_list[iloop][2], root_groups_list[iloop][3], new_group_for_this_root]);
+			completely_flat_roots := subsop(seq(ind=NULL, ind=convert(indices_to_delete, list)), completely_flat_roots);
+		fi;
+
+#		printf("New size of CFL = %a.\n",nops(completely_flat_roots));
+		
+	od:
+
+#	for i from NumElems(final_equiv_classes) to 1 by -1 do
+#		if verbose >= 3 then
+#			printf("      Examining root: %s\n", pp_digits(final_equiv_classes[i][2][1][2], final_equiv_classes[i][1]));
+#		fi;
+#		td := min(final_equiv_classes[i][1], max(min_multi_root_tol, ceil(final_equiv_classes[i][1]*multi_root_ratio)));
+#		target := final_equiv_classes[i][2][1][2];
+#		new_final_equiv_class := [final_equiv_classes[i][1], final_equiv_classes[i][2][1][2], Array([])];
+#		
+#		to_delete := [];
+#		
+#		for j from 1 to nops(flat_roots) do
+#			if flat_roots[j] <> NULL and floor(Re(flat_roots[j][2])*10^td) = floor(Re(target)*10^td) and floor(Im(flat_roots[j][2])*10^td) = floor(Im(target)*10^td) then
+#				
+#				Append(new_final_equiv_class[3], flat_roots[j]);
+#				to_delete := [op(to_delete), j]:
+#			fi;
+#		od;
+#		flat_roots := subsop(seq(ind=NULL, ind=to_delete), flat_roots);
+#		if NumElems(new_final_equiv_class[3]) <> 0 and member(new_final_equiv_class[2], [seq(sldkjd[2], sldkjd=new_final_equiv_class[3])]) then
+#			Append(new_final,new_final_equiv_class);
+#		fi;
+#	od:
+	
+	if verbose >= 1 then
+		printf("All roots sorted in: %4.2f seconds.\n\n",time()-t);
+	fi;
+	
+	# return new_final;
+				
+	#======================================#
+	point_exp_pairs := [];
+	
+	if verbose >= 1 then
+		printf("Calculating Exponents...   \n");
+	fi;
+	t := time():
+	
+	roots_to_return := [];
+	
+	for i from 1 to NumElems(new_final) do
+	
+		root_occurs := root_types_to_keep(root_types(root_location_list(new_final[i][4])));
+
+		main_num_disp := nice_num_display([seq(new_final[i][4][jloop][2], jloop=1..ArrayTools[NumElems](new_final[i][4]))]);
+# 		printf("%a\n", main_num_disp);
+				
+		root_entry := [new_final[i][1], main_num_disp];
+		for types from 1 to nops(root_occurs) do
+			
+			pair := [root_occurs[types][1][2], nops(root_occurs[types])];
+			if verbose >= 2 then
+				printf("   Calculating for %a-fold root at %s   \n", root_occurs[types][1][2], main_num_disp);
+			fi;
+	
+			this_pair_exps := []:
+			exps_failed := 0;
+			
+			for j from 1 to nops(root_occurs[types]) do
+
+#				if verbose >= 4 or (verbose = 3 and (j mod 10) = 0) or (verbose = 2 and (j mod 100) = 0) or (verbose = 1 and (j mod 1000) = 0) then
+#					printf("      [%a/%a]...  ", j, nops(root_occurs[types]));
+#					tt := time();
+#				fi;
+								
+				closest_root := closest_to(convert(roots[root_occurs[types][j][1]],list), new_final[i][2]);
+
+
+				this_exp := calc_exp(approximants[root_occurs[types][j][1]], root_occurs[types][j][2], diff_order, closest_root, Digits);
+				
+				
+				roots_to_return := [op(roots_to_return), [closest_root, this_exp]];
+								
+				if this_exp = -1 then
+					exps_failed := exps_failed + 1;
+					printf("Warning: an approximant failed to return the expected number of exponents [%a]\n",root_occurs[types][j]);
+				elif this_exp = -2 then
+					exps_failed := exps_failed + 1;
+					printf("Warning: root degree is greater than diff order; ignoring\n");
+				else
+#					printf("%a\n", this_exp);
+					for exploop from 1 to nops(this_exp) do
+						if Im(this_exp[exploop]) > 1e-3 then
+							printf("Warning: taking only real part of exponent [%a].\n",evalf[10](this_exp[exploop]));
+						fi;
+					od;
+					this_exp := [seq(Re(te),te=this_exp)];
+					
+					
+					this_pair_exps := [op(this_pair_exps), this_exp];
+#					if verbose >= 4 or (verbose = 3 and (j mod 10) = 0) or (verbose = 2 and (j mod 100) = 0) or (verbose = 1 and (j mod 1000) = 0) then
+#						printf("   %5.3f seconds.\n",time()-tt);
+#					fi;
+				fi;
+								
+				
+			od;
+	
+			if nops(this_pair_exps) > 0 then
+				root_entry := [op(root_entry), [nops(this_pair_exps)]];
+			
+				for root_t from 1 to root_occurs[types][1][2] do
+
+					this_type_exps := sort([seq(tpe[root_t], tpe=this_pair_exps)]):
+					exp_start := max(1, floor(nops(this_type_exps)*tail_percent_to_remove));
+					exp_end := nops(this_type_exps) - floor(nops(this_type_exps)*tail_percent_to_remove);
+					this_type_exps := [op(exp_start..exp_end, this_type_exps)];
+
+					root_entry[-1] := [op(root_entry[-1]), nice_num_display(this_type_exps)];
+				od;
+			fi;
+		od;
+		
+		point_exp_pairs := [op(point_exp_pairs), root_entry];
+	od;
+
+	if verbose >= 1 then
+		printf("All exponents calculated in: %4.2f seconds.\n\n",time()-t);
+	fi;
+
+	#======================================#
+	if verbose >= 1 then
+		printf("Finished in %5.3f seconds.\n", time()-overall_time);
+	fi;
+	
+#	return(point_exp_pairs);
+	
+	results_string := pp_results(point_exp_pairs, nops(valid_degree_seqs), num_failed, maple_bug_occur);
+	
+	printf("\n\n%s\n",results_string);
+	
+# 	return roots_to_return;
+	return();
+	
+end:
+
+#================================================================#
+
+# terms (list): list of 
+# da_order (posint): order of the ODE to be built
+# poly_order (nonnegint or list): degree of polynomial coefficients
+#     if an integer given, all (da_order+2) polynomials will have that degree
+#     if a list L is given, the degree of the non-homogeneous term will be L[1]
+#     	and the degree of the f^(n) term will be L[n+2].
+# returns -1 if system can't be solved
+
+build_approximant := proc(terms, da_order, poly_order, bias_list)
+	local num_unknowns, effective_degree, f, poly_vars, seq_derivs, expr, terms_to_solve, has_sol, sol, sols, leftover_vars, answer_poly_vars, ok, h, gcds, st, verbose, output, iargs, igcd, poly_list;
+
+	output := "";
+	verbose := false;
+
+# 	printf("%a\n", bias_list);
+
+	# Read the optional command line arguments
+	for iargs from 5 to nargs do
+		if convert(args[iargs], string) = "verbose" then
+			verbose := true;
+			output := cat(output, sprintf("Activating <verbose> mode.\n"));
+		fi;
+	od;
+	if Length(output) > 1 then
+		printf("%s\n",output);
+	fi;
+
+	if type(poly_order, nonnegint) then
+		poly_list := [seq(poly_order, iloop=0..da_order+1)];
+	else
+		poly_list := poly_order;
+	fi;
+	
+	if not type(poly_list, list(nonnegint)) then
+		error "poly_order list is not a list of non-negative integers: %1", poly_list;
+	fi;
+	if nops(poly_list) <>  da_order + 2 then
+		error "poly_order list has the wrong length: %1", poly_list;
+	fi;
+
+	num_unknowns := sum(poly_list[iloop]+1,iloop=1..nops(poly_list)) - 1;
+	effective_degree := nops(terms) - da_order;
+
+	if verbose then
+		printf("terms used: %a\n\n", num_unknowns);
+	fi;
+
+	if num_unknowns > effective_degree then
+		error "num_unknowns > effective_degree: (%1 < %2)", num_unknowns, effective_degree;		
+	fi;
+
+	if verbose then
+		st := time();
+		printf("Building seqs... ");
+	fi;
+#	printf("%a\n", poly_list);	
+	# Set up polynomials, then make the leading term of the leading polynomial 1
+	poly_vars := [seq(add(p[jloop,iloop]*x^iloop, iloop=0..poly_list[jloop+2]), jloop=-1..da_order)];
+	poly_vars[nops(poly_vars)] := poly_vars[nops(poly_vars)] - coeff(poly_vars[nops(poly_vars)], x, poly_list[da_order+2])*x^(poly_list[da_order+2]) + x^(poly_list[da_order+2]);
+# 	poly_vars[nops(poly_vars)] := poly_vars[nops(poly_vars)] - coeff(poly_vars[nops(poly_vars)], x, 0) + 1;
+#	printf("%a, %a\t\n", nops(indets(poly_vars))-1, num_unknowns);
+
+	# BIAS THE APPROXIMANT
+	if nops(bias) > 0 then
+		poly_vars[nops(poly_vars)] := poly_vars[nops(poly_vars)]*mul(x-BIAS, BIAS=bias_list);
+	fi;
+	# END BIAS
+	
+#	printf("%a\n", poly_vars[nops(poly_vars)]);
+	
+	f := sum(terms[iloop]*x^(iloop-1), iloop=1..(num_unknowns + da_order));
+	seq_derivs := [seq(truncdiff(f,iloop,num_unknowns-1), iloop=0..da_order)];
+
+	expr := poly_vars[1] + add(poly_vars[iloop] * seq_derivs[iloop-1], iloop=2..(da_order+2));
+	terms_to_solve := [seq(coeff(expr, x, iloop), iloop = 0 .. num_unknowns-1)];
+	
+	if verbose then
+		printf("\t(%a seconds)\n", (time()-st));
+		printf("Solving... ");
+		st := time();
+	fi;
+
+#	printf("%a\n", terms_to_solve);
+
+	sols := Linear(terms_to_solve, indets(terms_to_solve));
+	if evalb(sols=op([])) then
+		return(-1);
+	fi;
+	
+	if verbose then
+		printf("\t(%a seconds)\n", (time()-st));
+		printf("Checking Solutions and GCDing... ");
+		st := time();
+	fi;
+
+		
+	has_sol := false;
+	for sol in sols do
+#		printf("%a\n", sol);
+		if (rhs(sol) <> 0) then
+			ok := true;
+		fi;
+	od;
+  
+	if (ok = false) then
+		return false;
+	fi;
+	
+
+	# Take GCD of all solutions
+# 	printf("\n\n%a\n\n", poly_vars);
+	h := subs(sols, poly_vars);	
+	gcds := h[1];
+	for igcd from 2 to nops(h) do
+# 		printf("\n\tgcd(%a,%a)\n", gcds, h[igcd]);
+		gcds := gcd(gcds, h[igcd]);
+	od;
+	h := map(q -> simplify(q/gcds), h);
+
+	if verbose then
+		printf("\t(%a seconds)\n", (time()-st));
+	fi;
+		
+	
+	# Sub in 0 for extra vars
+	leftover_vars := indets([seq(rhs(sols[iloop]), iloop = 1 .. nops(sols))]);
+	
+	if nops(leftover_vars) > 0 then
+		answer_poly_vars := subs({seq(leftover_vars[iloop] = 0, iloop = 1 .. nops(leftover_vars))}, h);
+	else
+		answer_poly_vars := h;
+	fi;
+
+	return answer_poly_vars;	
+end:
+
+#================================================================#
+
+# helper procedures
+
+#### ========================================= ####
+#### ============ NEW CODE START ============= ####
+#### ========================================= ####
+
+array_append := proc(Arr, item)
+	local new_array;
+	new_array := Array(Arr);
+	new_array(ArrayTools[NumElems](new_array)+1) := item;
+	return new_array;
+end:
+
+array_append_pair := proc(Arr, item)
+	local new_array;
+	new_array := Array(Arr);
+	new_array(ArrayTools[Size](new_array,1)+1,1) := item[1];
+	new_array(ArrayTools[Size](new_array,1),2) := item[2];
+	return new_array;
+end:
+
+array_extend := proc(Arr, item)
+	local new_array, iloop;
+	new_array := Array(Arr);
+	for iloop from 1 to nops(item) do
+		new_array := array_append(new_array, item[iloop]);
+	od:
+	return new_array;
+end:
+
+array_select_first := proc(Arr, item)
+	local index_list, iloop;
+	for iloop from 1 to ArrayTools[Size](Arr, 1) do
+		if convert(Arr[iloop],list) = convert(item,list) then
+			return iloop;
+		fi:
+	od:
+
+	return -1;
+end:
+
+array_select_all := proc(Arr, item)
+	local index_list, iloop;
+	index_list := Array([]);
+	for iloop from 1 to ArrayTools[Size](Arr, 1) do
+		if convert(Arr[iloop],list) = convert(item,list) then
+			index_list := array_append(index_list, iloop);
+		fi:
+	od:
+
+	return convert(index_list, list);
+end:
+
+dist_squared := proc(a, b)
+	return (Re(a)-Re(b))^2 + (Im(a)-Im(b))^2;
+end:
+
+# center_point and array_of_points give in the [#,root] format
+find_points_within := proc(array_of_points, center_point, tol)
+	local points_within, iloop;
+	points_within := Array([[]]);
+	for iloop from 1 to ArrayTools[Size](array_of_points, 1) do
+		if dist_squared(center_point[2], array_of_points[iloop][2]) < tol^2 then
+			points_within := array_append_pair(points_within, array_of_points[iloop]);
+		fi;
+	od:
+	return points_within;
+end:
+
+# Take a list of roots, sort them by real parts, find the minimal distance between real parts
+# assumes the input list is just a list of roots [r1, r2, ... ] sorted by real parts
+min_real_distance := proc(root_list)
+	local minimum_difference, i;
+	minimum_difference := 1000;
+	for i from 2 to nops(root_list) do
+		if Re(root_list[i])-Re(root_list[i-1]) < minimum_difference and (Im(root_list[i]) <> -1*Im(root_list[i-1]) or Im(root_list[i]) = 0) then
+			minimum_difference := Re(root_list[i])-Re(root_list[i-1]):
+		fi;
+	od:
+	return minimum_difference;
+end:
+
+# assumes the list_of_roots is sorted by real parts, of form [[1, r_1], [5, r_2], ...]
+# could be sped up by checking if there enough points left at each point to satisfiy {num points} > {threshold}*{num lists}
+radiate_mode := proc(list_of_roots, tol)
+	local queue, copy_of_roots, good_points, point_to_check, points_within, iloop, starting_point;
+	copy_of_roots := Array(list_of_roots);
+	starting_point := copy_of_roots[1];
+
+	copy_of_roots := LinearAlgebra[DeleteRow](copy_of_roots, [1]);
+
+	good_points := Array([[]]);
+	good_points := array_append_pair(good_points, starting_point);
+	queue := Array([[]]);
+#	printf("Starting point: %a\n", starting_point);
+	queue := array_append_pair(queue, starting_point);
+
+
+	# while there are roots to be processed, do the following
+	while ArrayTools[Size](queue, 1) > 0 and ArrayTools[Size](copy_of_roots, 1) > 0 do
+		# pull the first thing out of the queue and delete it from the roots list
+#		printf("\t\tQueue: %a\n", queue);
+		point_to_check := queue[1];
+#		printf("\t\tPOINTTOCHECK: %a\n",point_to_check);
+		queue := LinearAlgebra[DeleteRow](queue, [1]);
+#		printf("\t\tIS DELETED?: %a\n", queue);
+
+
+#		printf("Currently good = %a\n",ArrayTools[Size](good_points, 1));
+		points_within := find_points_within(copy_of_roots, point_to_check, tol);
+
+		# add all these points to good_points, and to the queue, and remove them from copy_of_roots
+		for iloop from 1 to ArrayTools[Size](points_within, 1) do
+			queue := array_append_pair(queue, points_within[iloop]);
+			good_points := array_append_pair(good_points, points_within[iloop]);
+#			printf("About to delete %a from %a.\n",points_within[iloop],copy_of_roots);
+			copy_of_roots := LinearAlgebra[DeleteRow](copy_of_roots, array_select_first(copy_of_roots, points_within[iloop]));
+#			printf("DID IT WORK? %a\n",copy_of_roots);
+		od:
+	od:
+	
+	return good_points;
+	
+end:
+
+# IMPORTANT: Assumes Digits has been set appropriately before entry
+# 
+# list_of_root_lists contains lists of pairs (i, r), where i is a label we need
+# in order to tell which differential approximant it came from, and r is the 
+# root itself
+partition_roots := proc(list_of_root_lists, filter_tolerance, max_tol, min_tol, verbose)
+	local number_of_lists, list_of_all_roots, minimum_difference, rloop, minimum_difference_exponent, current_tol, final_root_groups, current_diff_comparison, to_delete, root_copy, pass_to_radiate, iloop, roots_in_group, root_indices, roots_to_delete, to_del;
+
+	# store number of lists to check tolerance against later
+	number_of_lists := nops(list_of_root_lists);
+	
+	# flatten the list of roots and sort them by root value
+	# then find the smallest difference between any pair
+	list_of_all_roots := ListTools[FlattenOnce](list_of_root_lists);
+	list_of_all_roots := sort(list_of_all_roots, (a,b) -> Re(a[2]) < Re(b[2]));
+	minimum_difference := min_real_distance([seq(rloop[2],rloop=list_of_all_roots)]);
+
+	# now convert the list to an Array for all the deleting we'll
+	# be doing later
+	list_of_all_roots := convert(list_of_all_roots, Array);
+
+	# if there is a difference of zero, set our start point at 
+	# {max_tol}, otherwise at the biggest (negative) power of 2
+	# smaller than the difference
+	if minimum_difference = 0 then
+		minimum_difference_exponent := max_tol;
+	else
+		minimum_difference_exponent := -1*floor(log(minimum_difference)/log(2));
+	fi;
+	current_tol := min(minimum_difference_exponent, max_tol);
+	
+	final_root_groups := Array([]);
+	# as long as there are still roots to be partitioned and we haven't
+	# gone all the way to {min_tol}, repeat the following
+	#    Pass through the list, identifying chains of roots with each consecutive
+	#    pair less than 2^(-{current_tol}) apart. When you reach the end of each chain
+	#    look back at it. If it represents at least {filter_tolerance} of the root
+	#    groups, keep it as valid and deleted it. Otherwise, leave it.
+	
+	while current_tol >= min_tol and ArrayTools[Size](list_of_all_roots,1) > 0 do
+		if verbose >= 10 or (verbose >= 5 and current_tol mod 10 = 0) then
+			printf("Currently starting loop with current_tol = %a, and num_roots = %a.\n",current_tol,ArrayTools[Size](list_of_all_roots,1));
+		fi:
+		current_diff_comparison := 2^(-1*current_tol);
+
+	
+		root_copy := Array(list_of_all_roots);
+		
+		while ArrayTools[Size](root_copy,1) > 1 do
+			
+			
+			if Re(root_copy[2][2]) - Re(root_copy[1][2]) > current_diff_comparison then
+				root_copy := LinearAlgebra[DeleteRow](root_copy, [1]);
+				next;
+			fi;
+
+#			printf("\tRepeating tol = %a with root_copy = %a.\n", current_tol, ArrayTools[Size](root_copy,1));
+
+			# Now, the first thing in {root_copy} has another root with real part within tolerance
+			# So, we start with this as the center point and radiate outward grabbing all points
+			# within tolerance distance
+
+			# First gather all points with real part within tolerance of the first point
+#			printf("Building chain to pass.\n");
+			pass_to_radiate := Array([]);
+			pass_to_radiate := array_append_pair(pass_to_radiate, root_copy[1]);
+			pass_to_radiate := array_append_pair(pass_to_radiate, root_copy[2]);
+			for iloop from 3 to ArrayTools[Size](root_copy,1) do
+				
+				if Re(root_copy[iloop][2]) - Re(root_copy[iloop-1][2]) < current_diff_comparison then
+#					printf("\tPass chain so far: %a\n",pass_to_radiate);
+					pass_to_radiate := array_append_pair(pass_to_radiate, root_copy[iloop]);
+					
+				else
+					break;
+				fi;
+			od:
+
+			# If the number of things I'm about to check is not enough to ever reach the threshold,
+			# then we shouldn't bother. We can just delete them and move on.
+			if ArrayTools[Size](pass_to_radiate, 1) >= filter_tolerance * number_of_lists then
+				# Do the radiation and get back a list of roots that comprise the group
+				# in the [[1, r1], [5, r2], ...] form. Returns a list of the same form
+				# of the roots in the group.
+#				printf("Passing in chain: %a\n\n\n", pass_to_radiate);
+				roots_in_group := radiate_mode(pass_to_radiate, current_diff_comparison);
+#				printf("Back from radiate with %a\n\n", roots_in_group);
+				
+				# Now check if there are enough, if so keep them. Either way we'll delete them all.
+				root_indices := {seq(roots_in_group[iloop][1], iloop=1..ArrayTools[Size](roots_in_group, 1))};
+				if nops(root_indices) >= filter_tolerance * number_of_lists then
+					final_root_groups := array_append(final_root_groups, [current_tol, roots_in_group]);
+					printf("\tFound a root at tol = %a.\n",current_tol);
+					for iloop from 1 to ArrayTools[Size](roots_in_group, 1) do
+
+						to_del := array_select_all(list_of_all_roots, roots_in_group[iloop]);
+						if nops(to_del) > 0 then
+							list_of_all_roots := LinearAlgebra[DeleteRow](list_of_all_roots, array_select_all(list_of_all_roots, roots_in_group[iloop]));
+						fi;
+
+					od:
+				fi;
+
+#				return [root_indices, final_root_groups];
+				roots_to_delete := Array([]);
+				for iloop from 1 to ArrayTools[Size](roots_in_group, 1) do
+#					printf("roots_to_delete = %a\n", roots_to_delete);
+#					printf("\t root_copy = %a\troots_in_group[iloop] = %a\t select = %a\n", root_copy, roots_in_group[iloop],array_select_all(root_copy, roots_in_group[iloop])); 
+#					return [root_copy, roots_in_group[iloop]];
+					roots_to_delete := array_extend(roots_to_delete, array_select_all(root_copy, roots_in_group[iloop]));
+#					printf("Found %a at %a.\n",roots_in_group[iloop], array_select_all(root_copy, roots_in_group[iloop])):
+				od:
+	
+#				printf("Going to delete: %a\n", roots_to_delete);
+			else
+				roots_to_delete := [seq(1..ArrayTools[Size](pass_to_radiate, 1))];
+			fi;
+			
+			# Now delete the rows appearing in {roots_in_group} from {root_copy}
+			roots_to_delete := convert(convert(roots_to_delete, set), list);
+#			printf("Going to delete: %a\n",roots_to_delete);
+			root_copy := LinearAlgebra[DeleteRow](root_copy, roots_to_delete);		
+
+		od:
+
+		current_tol := current_tol - 1;
+	od:
+
+	return final_root_groups;
+end:
+
+
+root_group_midpoint_and_radius := proc(array_of_roots)
+	local retotal, imtotal, iloop, midpt, max_dist_squared;
+	retotal := 0;
+	imtotal := 0;
+	for iloop from 1 to ArrayTools[Size](array_of_roots, 1) do
+		retotal := retotal + Re(array_of_roots[iloop][2]);
+		imtotal := imtotal + Im(array_of_roots[iloop][2]);
+	od:
+	midpt := retotal/ArrayTools[Size](array_of_roots, 1) + I*imtotal/ArrayTools[Size](array_of_roots, 1);
+	max_dist_squared := 0;
+	for iloop from 1 to ArrayTools[Size](array_of_roots, 1) do
+		if dist_squared(midpt, array_of_roots[iloop][2]) > max_dist_squared then
+			max_dist_squared := dist_squared(midpt, array_of_roots[iloop][2]);
+		fi:
+	od:
+
+	return [midpt, sqrt(max_dist_squared)];
+end:
+
+
+
+
+
+#### ========================================= ####
+#### ============= NEW CODE END ============== ####
+#### ========================================= ####
+
+
+# Assumes d >= 0
+partition_by_digit := proc(S, d, is_tagged)
+	local newS, i, j, to_output, dig, check_against, to_compare, found, to_check;
+	newS := Array([]);
+	
+	for i from 1 to nops(S) do
+	
+		if is_tagged then
+			to_check := S[i][2];
+		else
+			to_check := S[i];
+		fi;
+		if d = 0 then
+			dig := [sign(Re(to_check)), sign(Im(to_check)), floor(abs(Re(to_check))), floor(abs(Im(to_check)))];
+		else
+			dig := [floor(abs(Re(to_check))*10^d) mod 10, floor(abs(Im(to_check))*10^d) mod 10];
+		fi;
+					
+		found := false;
+		for j from 1 to NumElems(newS) do
+			if is_tagged then
+				check_against := newS(j)[1][2];
+			else
+				check_against := newS(j)[1];
+			fi;
+			if d = 0 then
+				to_compare := [sign(Re(check_against)), sign(Im(check_against)), floor(abs(Re(check_against))), floor(abs(Im(check_against)))];
+			else
+				to_compare := [floor(abs(Re(check_against))*10^d) mod 10, floor(abs(Im(check_against))*10^d) mod 10];
+			fi;
+			if to_compare = dig then
+				newS(j)(NumElems(newS(j))+1) := S[i];
+				found := true
+			fi;
+		od;
+		if not found then
+			newS(NumElems(newS)+1) := Array([]);
+			newS(-1)(1) := S[i];
+		fi;
+	od;
+	
+	to_output := convert(newS,list);
+	return([seq(convert(nl,list),nl=to_output)]);
+end:
+
+count_root_presence := proc(L)
+	return nops({seq(T[1],T=L)});
+end:
+
+root_location_list := proc(K)
+	return([seq(M[1], M=K)]);
+end:
+
+count_root_locations := proc(root_location_list)
+	return nops({op(root_location_list)});
+end:
+
+root_types := proc(root_location_list)
+	return([seq([t,Occurrences(t,root_location_list)], t={op(root_location_list)})]);
+end:
+
+root_types_to_keep := proc(rt)
+	local root_type_set, rt_list, num_approx, roots_keep, root_keep_ratio, root_type_keep, iloop, jloop;
+	
+	root_keep_ratio := 0;
+	roots_keep := [];
+	root_type_keep := [];
+	
+	root_type_set := {seq(l[2],l=rt)};
+	rt_list := [seq(l[2],l=rt)];
+	num_approx := nops(rt_list);
+	
+	for iloop from 1 to nops(root_type_set) do
+		if Occurrences(root_type_set[iloop], rt_list)/num_approx > root_keep_ratio then
+			root_type_keep := [op(root_type_keep), root_type_set[iloop]];
+		fi;
+	od;
+		
+	for iloop from 1 to nops(root_type_keep) do
+		roots_keep := [op(roots_keep), []];
+		for jloop from 1 to nops(rt) do
+			if rt[jloop][2] = root_type_keep[iloop] then
+				roots_keep[-1] := [op(roots_keep[-1]), rt[jloop]];
+			fi;
+		od;
+	od;
+	
+	return(roots_keep);
+end:
+
+calc_exp := proc(approx, root_order, diff_order, r, numdigs)
+	local poly_to_solve, poly_to_solve_eval, i, to_return, olddigs, j;
+	
+	olddigs := Digits;
+	Digits := numdigs;
+	
+	if root_order > diff_order then
+		return(-2);
+	fi;
+
+	poly_to_solve := sum(1/factorial(i)*diff_or_none(approx[diff_order - root_order + i + 2], i)*product(rr - (diff_order - root_order + j), j=0..i-1), i=0..root_order);
+	poly_to_solve_eval := subs(x=evalf[numdigs](r), poly_to_solve);
+	to_return := sort([fsolve(simplify(poly_to_solve_eval), fulldigits, complex)]);	
+	
+	Digits:=olddigs;
+	
+	if nops(to_return) = root_order then
+# 		printf("[%a, %a]\n", r, to_return);
+		return(to_return);
+	else
+		printf("[bad exp = %a]\n",to_return);
+	fi;
+	
+	return(-1);
+end:
+
+diff_or_none := proc(f,d)
+	if d = 0 then
+		return(f);
+	else
+		return(diff(f,x$d));
+	fi;
+end:
+
+closest_to := proc(L,pt)
+	local cl, md, i;
+	
+	if nops(L) = 0 then
+		return(FAIL);
+	fi;
+	
+	cl := L[1];
+	md := abs(pt - L[1]);
+	
+	for i from 2 to nops(L) do
+		if abs(pt - L[i]) < md then
+			md := abs(pt - L[i]);
+			cl := L[i];
+		fi;
+	od;
+		
+	return(cl);
+end:
+
+
+eliminate_eq_classes := proc(eq, thresh, num_approx)
+	local newEq, i;
+	
+	newEq := Array([]);
+	for i from 1 to nops(eq) do
+		if count_root_presence(eq[i])/num_approx >= thresh then
+			newEq(NumElems(newEq)+1) := eq[i];
+		fi;
+	od;
+	
+	return(convert(newEq,list));
+end:
+
+arrayop := proc(A)
+	local R;
+	return(op(convert(A,list)));
+end:
+
+truncdigits := proc(x, d)
+	return(evalf(trunc(x*10^d)/10^d));
+end:
+
+truncdigitscomplex := proc(x, d)
+	return(truncdigits(Re(x),d) + I*truncdigits(Im(x),d));
+end:
+
+checkto := proc(x,y,d)
+	return evalb(truncdigitscomplex(x,d)=truncdigitscomplex(y,d));
+end:
+
+truncdiff := proc(f, n, d)
+  option remember;
+  if n = 0 then
+  	return(convert(series(f, x, d+1), polynom));
+  fi;
+  return(convert(series(diff(f,x$n), x, d+1), polynom));
+end:
+
+itertolist := proc(IL)
+	local K;
+	K := [];
+	while not IL[finished] do
+		K := [op(K), IL[nextvalue]()];
+	od;
+	return(K);
+end:
+
+pp_digits := proc(x,d)
+	local string_to_return, absx, iloop;
+	
+	if Im(x) < 0 then
+		return cat(pp_digits(Re(x), d), " - ", pp_digits(abs(Im(x)),d),"*I");
+	elif Im(x) > 0 then
+		return cat(pp_digits(Re(x), d), " + ", pp_digits(Im(x),d),"*I");
+	fi;
+	
+	if x < 0 then
+		string_to_return := "-";
+	else
+		string_to_return := "";
+	fi;
+	
+	absx := abs(x);
+	string_to_return := cat(string_to_return, floor(absx));
+	
+	if d > 0 then
+		string_to_return := cat(string_to_return, ".");
+	fi;
+	
+	for iloop from 1 to d do
+		string_to_return := cat(string_to_return, sprintf("%d", floor(absx*10^iloop) mod 10));
+	od;
+	
+	return(string_to_return);
+end:
+
+pp_results := proc(res, num_valid_degree_seqs,num_failed, maple_bug_occur)
+	local results, i, j, k, app_s, comp_s;
+	
+	results := "#####################################################\n#                                                   #\n#                      RESULTS                      #\n#                                                   #\n#####################################################\n\n";
+	results := cat(results, "[!!!]  Error bounds are not rigorous. Please read the documentation for more information.\n\n");
+	
+	app_s := "approximant";
+	comp_s := "computation";
+	
+	if num_failed <> 1 then 
+		app_s := "approximants";
+	fi;
+	
+	if maple_bug_occur <> 1 then
+		comp_s := "computations";
+	fi;
+	
+	
+	results := cat(results, sprintf("Attempted to build [%d] differential approximants.\n    [%d] %s could not be built.\n    [%d] root %s failed due to a maple bug.\n\n\n", num_valid_degree_seqs, num_failed, app_s, maple_bug_occur, comp_s));
+	if nops(res) = 1 then
+		results := cat(results, sprintf("1 singularity detected.\n\n", nops(res)));
+	else
+		results := cat(results, sprintf("[%d] singularities detected.\n\n", nops(res)));
+	fi;
+	
+	for i from 1 to nops(res) do
+		results := cat(results, sprintf("  (%d)  x = %s\n", i, res[i][2]));
+		for j from 3 to nops(res[i]) do
+			results := cat(results, sprintf("            %d-fold root detected in %d approximants\n", nops(res[i][j])-1, res[i][j][1]));
+			for k from 2 to nops(res[i][j]) do
+				results := cat(results, sprintf("                 [%d] %s\n", k-1, res[i][j][k]));
+			od;
+		od;
+		results := cat(results, "\n");
+	
+	od;
+	
+	return(results);
+end:
+
+
+nice_num_display := proc(num_set)
+	local maxrerange, minrerange, maximrange, minimrange, re_digs_to_show, im_digs_to_show, re_diff, im_diff, str_num, re_mid, im_mid;
+	maxrerange := max([seq(Re(nloop),nloop=num_set)]);
+	minrerange := min([seq(Re(nloop),nloop=num_set)]);
+	maximrange := max([seq(Im(nloop),nloop=num_set)]);
+	minimrange := min([seq(Im(nloop),nloop=num_set)]);
+	
+
+	re_diff := maxrerange - minrerange;
+	im_diff := maximrange - minimrange;
+
+	re_mid := (maxrerange + minrerange)/2;
+	im_mid := (maximrange + minimrange)/2;
+
+	str_num := "";
+
+	if nops(num_set) = 1 then
+		str_num := cat(str_num, sprintf("%d(*)", round(Re(num_set[1]))));
+		if round(Im(num_set[1])) <> 0 then
+			str_num := cat(str_num, sprintf(" + %di(*)", round(Re(num_set[1]))));
+		fi:
+		return str_num;
+	fi:
+
+	if re_diff = 0 then
+		str_num := cat(str_num, sprintf("%a",Re(num_set[1])));
+		str_num := cat(str_num, "(NE)");
+	else
+		re_digs_to_show := -1 * floor(log(re_diff)/log(10.0));
+		str_num := cat(str_num, pp_digits(Re(re_mid), re_digs_to_show));
+		str_num := cat(str_num, sprintf("(%d)", ceil((re_diff*10^re_digs_to_show)/2)));
+	fi:
+
+	if im_diff <> 0 or im_mid <> 0 then
+		str_num := cat(str_num, " + ");
+		if im_diff = 0 then
+			str_num := cat(str_num, sprintf("%a",Im(num_set[1])));
+			str_num := cat(str_num, "(NE)i");
+		else
+			im_digs_to_show := -1 * floor(log(im_diff)/log(10.0));
+			str_num := cat(str_num, pp_digits(im_mid, im_digs_to_show));
+			str_num := cat(str_num, sprintf("(%d)i", ceil((im_diff*10^im_digs_to_show)/2)));
+		fi:
+	fi:
+
+	return str_num;
+end:
+
+
+
+#### ========================================= ####
+#### =========== SERIES EXTENSION ============ ####
+#### ========================================= ####
+
+lode_series := proc(coeffs, init, deg, at_a_time)
+	local final_ser, _a, iloop, diff_expr, known_terms, terms_todo, temp_ser, c_to_solve;
+	
+	if nops(coeffs) <= 2 then
+		error sprintf("Not a differential equation.");
+	fi;
+	
+	if nops(coeffs) - 2 <> nops(init) then
+		error sprintf("Please provide exactly %a initial conditions.", nops(coeffs)-2);
+	fi;
+	
+	diff_expr := coeffs[1] + coeffs[2]*((_F)(z)) + add(coeffs[iloop]*diff((_F)(z), z$(iloop-2)), iloop=3..nops(coeffs));
+
+	for iloop from 1 to nops(init) do
+		_a[iloop-1] := init[iloop];
+	od;
+	
+	known_terms := nops(init);
+	final_ser := add(_a[iloop]*z^(iloop), iloop=0..deg);
+	
+	while known_terms < deg + 1 do
+
+		userinfo(5, lode_series, NoName, known_terms, `/`, deg+1);
+		terms_todo := min(at_a_time, deg + 1 - known_terms);
+		temp_ser := eval(subs((_F)(z) = convert(series(final_ser,z,known_terms+terms_todo+10), polynom), diff_expr));
+
+		temp_ser := convert(series(temp_ser, z, known_terms  + terms_todo + 5), polynom);
+
+		c_to_solve := [seq(coeff(temp_ser, z, iloop), iloop=(known_terms-nops(init))..(known_terms+terms_todo-1-nops(init)))];
+		
+		
+# 		printf("\t%a\n", c_to_solve);
+		
+		
+		final_ser := subs(Linear(c_to_solve, indets(c_to_solve)), final_ser);
+		known_terms := known_terms + terms_todo;
+	od;
+	
+	return final_ser;
+	
+end:
+
+
+
+
+lode_series_with_gfun := proc(coeffs, init, deg)
+	local iloop, diff_expr, gfun_proc;
+	
+#	printf("A\n");
+	
+	if nops(coeffs) <= 2 then
+		error sprintf("Not a differential equation.");
+	fi;
+	
+	if nops(coeffs) - 2 <> nops(init) then
+		error sprintf("Please provide exactly %a initial conditions.", nops(coeffs)-2);
+	fi;
+	
+#	printf("B\n");
+	
+	diff_expr := coeffs[1] + coeffs[2]*((_F)(z)) + add(coeffs[iloop]*diff((_F)(z), z$(iloop-2)), iloop=3..nops(coeffs));
+	
+#	return {subs(x=z,diff_expr), _F(0) = init[1], seq((D@@N)(_F)(0) = init[N+1]*factorial(N), N=1..nops(init)-1)};
+	
+#	printf("%a\n", {diff_expr, _F(0) = init[1], seq((D@@N)(_F)(0) = init[N+1], N=1..nops(init)-1)});
+
+#	userinfo(5, lode_series_with_gfun, NoName, `now gen terms`);
+	
+#	printf("D\n");
+
+	gfun_proc := gfun[rectoproc](gfun[diffeqtorec]({subs(x=z,diff_expr), _F(0) = init[1], seq((D@@N)(_F)(0) = init[N+1]*factorial(N), N=1..nops(init)-1)}, _F(z), _a(n)), _a(n), remember):
+
+	return [seq(gfun_proc(N),N=0..deg)];
+	
+end:
+
+
+approx_set_to_coeff_list_set := proc(approxs, init, deg)
+	local SERS, iloop;
+	
+	if nops(approxs) = 0 then return []; fi;
+	if nops(init) < nops(approxs[1]) - 2 then
+		error "Not enough initial terms provided.";
+	fi;
+	
+	SERS := [seq(0, i=1..nops(approxs))];
+	
+	for iloop from 1 to nops(approxs) do
+		SERS[iloop] := lode_series_with_gfun((subs(x=z,approxs[iloop])), [op(..(nops(approxs[1])-2), init)], deg);
+#		SERS[iloop] := PolynomialTools[CoefficientList](lode_series_with_gfun(subs(x=z,approxs[iloop]), [op(..(nops(approxs[1])-2), init)], deg), z);
+		userinfo(5, approx_set_to_coeff_list_set, NoName, `Done with series`, iloop, `/`, nops(approxs));
+	od:
+	
+	return SERS;
+end:
+
+average_lists_drop_percent := proc(list_of_lists, drop_outer_percent)
+	return average_lists_drop_number(list_of_lists, ceil(drop_outer_percent/100.0*nops(list_of_lists)));
+end:
+
+average_lists_drop_number := proc(list_of_ser, drop_lowest, drop_highest, eval_digs, avg_func, filter)
+	local this_term, term_array, iloop, jloop, tloop, list_of_lists, old_digits;
+	global Digits;
+	
+	old_digits := Digits;
+	Digits := eval_digs + 10;
+	
+	if nops(list_of_ser) = 0 then return []; fi;
+	
+	if (drop_lowest+drop_highest) >= nops(list_of_ser) then
+		error "Dropping too many!"
+	fi;
+	
+	list_of_lists := list_of_ser;
+	
+	if eval_digs <> 0 then
+ 		list_of_lists := evalf(list_of_lists, eval_digs);
+	fi;
+	
+	term_array := Array([]);
+	
+	for iloop from 1 to nops(list_of_lists[1]) do
+		this_term := sort([seq(list_of_lists[jloop][iloop], jloop=1..nops(list_of_lists))], (a,b) -> evalf(a,100) < evalf(b,100));
+		this_term := [op((1+drop_lowest)..(nops(this_term)-drop_highest), this_term)];
+		term_array := array_append(term_array, avg_func(this_term));
+	od;
+	
+	Digits := old_digits;
+	
+	return convert(term_array,list);
+	
+end:
+
+mean_of_list := proc(L)
+	return add(l,l=L)/nops(L);
+end:
+
+median_of_list := proc(L)
+	if nops(L) mod 2 = 1 then return L[(nops(L)+1)/2]; fi;
+	return (L[nops(L)/2] + L[nops(L)/2+1])/2;
+end:
+
+geo_mean_of_list := proc(L)
+	return mul(l,l=L)^(1/nops(L));
+end:
+
+smallest_modulus := proc(L)
+	return sort([seq(abs(l),l=L)])[1];
+end:
+
+filter_approxs := proc(approxs, lower_filter)
+	local to_return, iloop, aroot;
+	
+	to_return := Array([]);
+	
+	for iloop from 1 to nops(approxs) do
+		aroot := [fsolve(approxs[iloop][-1])];
+		if smallest_modulus(aroot) >= lower_filter then
+			to_return := array_append(to_return, approxs[iloop]);
+		fi;
+	od;
+	
+	return convert(to_return, list);
+	
+end:
+
+
+
+
+
+
