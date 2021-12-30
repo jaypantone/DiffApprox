@@ -8,11 +8,11 @@ If this code is useful to you in your work, please consider citing it.
 
 ###### Bibtex entry:
 ```
-@misc{guessfunc,
+@misc{DiffApprox,
 	author = {Jay Pantone},
 	howpublished = {\url{https://github.com/jaypantone/DiffApprox}},
 	month = {December},
-	note = {DOI: \url{https://doi.org/...}},
+	note = {DOI: \url{https://doi.org/10.5281/zenodo.5810652}},
 	title = {{guessfunc}},
 	year = {2021}
 }
@@ -20,10 +20,10 @@ If this code is useful to you in your work, please consider citing it.
 
 ###### Biblatex entry:
 ```
-@software{guessfunc,
+@software{DiffApprox,
 	author = {Jay Pantone},
 	date = {2021},
-	doi = {...},
+	doi = {10.5281/zenodo.5810652},
 	month = {12},
 	title = {guessfunc},
 	url = {https://github.com/jaypantone/DiffApprox}
